@@ -23,7 +23,7 @@
 	vision_flags = NONE
 	color_cutoffs = null
 	/// List of selectable modes that can be used by the goggles
-	var/list/modes = list(MODE_NONE, MODE_MESON, MODE_TRAY)
+	var/list/modes = list(MODE_NONE, MODE_MESON, MODE_TRAY, MODE_AREA_BLUEPRINTS) // TGP EDIT
 	/// The current mode string that is selected from the modes list (used for icons)
 	var/mode = MODE_NONE
 	/// The current mode index that is selected from the modes list
