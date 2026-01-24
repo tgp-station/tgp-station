@@ -179,6 +179,8 @@
 				//====SAVING ATMOS====
 				if((save_flags & SAVE_TURFS))
 					var/turf/open/atmos_turf = pull_from
+					if(!isnull(pull_from) && (save_flags & SAVE_OBJECTS_PROPERTIES))
+						atmos_turf.on_object_saved(current_header, pull_from, obj_blacklist)
 					// Optimiziations that skip saving atmospheric data for turfs that don't need it
 					// - Walls: Atmos values should not realistically change
 					// - Space: Gas is constantly purged and temperature is immutable
