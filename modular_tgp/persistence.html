@@ -1,0 +1,421 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><base href="../"><link rel="stylesheet" href="dmdoc.css"><title>modular_tgp/persistence/README.md - /tg/ Station 13</title></head><body><header><a href="index.html">/tg/ Station 13</a> - <a href="index.html#modules">Modules</a> - <a href="index.html#types">Types</a></header><main><h1>World Saving System <aside>modular_tgp/persistence/README.md</aside> <a href="https://github.com/tgp-station/tgp-station/blob/0f67d518085748577dfd8d381e48dceb6a56cd44/modular_tgp/persistence/README.md"><img src="git.png" width="16" height="16" title="modular_tgp/persistence/README.md"></a></h1><table class="summary" cellspacing="0"><tr><td colspan="2"><p>This document explains how the world saving system works for contributors who want to add serialization support for new objects.</p>
+<h2 id="table-of-contents">Table of Contents</h2>
+<ol>
+<li><a href="#overview">Overview</a></li>
+<li><a href="#understanding-the-dmm-map-format">Understanding the DMM Map Format</a></li>
+<li><a href="#serialization-api">Serialization API</a></li>
+<li><a href="#adding-serialization-to-objects">Adding Serialization to Objects</a></li>
+<li><a href="#type-path-substitutions">Type Path Substitutions</a></li>
+<li><a href="#saving-objects-inside-containers">Saving Objects Inside Containers</a></li>
+<li><a href="#best-practices">Best Practices</a></li>
+</ol>
+<hr />
+<h2 id="overview">Overview</h2>
+<p>The World saving system serializes the game world state into <code>.dmm</code> map files that can be reloaded later. This allows the server to save and restore the state of objects, turfs, and areas between rounds or during autosaves.</p>
+<p>The system is built around several key concepts:</p>
+<ul>
+<li><strong>TGM Format</strong>: The map file format used by BYOND/DreamMaker</li>
+<li><strong>Variable Serialization</strong>: Saving object variables that differ from their initial values</li>
+<li><strong>Type Path Substitution</strong>: Compressing save data by using specialized subtypes instead of base types with many variables</li>
+<li><strong>Container Linking</strong>: A system for preserving parent-child relationships for objects stored inside other objects</li>
+</ul>
+<hr />
+<h2 id="understanding-the-dmm-map-format">Understanding the DMM Map Format</h2>
+<p>DMM (DreamMaker Map) files use the TGM (Tile Game Map) format. Understanding this format is essential for working with the world save system.</p>
+<h3 id="basic-structure">Basic Structure</h3>
+<p>A <code>.dmm</code> file has two sections:</p>
+<ol>
+<li><strong>Header Section</strong>: Defines unique tile compositions with letter keys</li>
+<li><strong>Coordinate Section</strong>: Maps coordinates to header keys</li>
+</ol>
+<h3 id="example-a-3x3-grid">Example: A 3x3 Grid</h3>
+<p>Consider a simple 3x3 map with some basic objects:</p>
+<pre><code class="language-dm">//MAP CONVERTED BY dmm2tgm.py THIS HEADER COMMENT PREVENTS ALARM
+&quot;a&quot; = (
+/turf/open/floor/plating,
+/area/station/maintenance
+)
+&quot;b&quot; = (
+/obj/structure/table,
+/turf/open/floor/iron,
+/area/station/commons
+)
+&quot;c&quot; = (
+/obj/item/wrench{
+	pixel_x = 5
+	},
+/obj/structure/table,
+/turf/open/floor/iron,
+/area/station/commons
+)
+&quot;d&quot; = (
+/turf/open/floor/iron,
+/area/station/commons
+)
+(1,1,1) = {&quot;
+aaa
+dbd
+dcd
+&quot;}
+</code></pre>
+<h3 id="how-this-maps-to-a-grid">How This Maps to a Grid</h3>
+<p>The coordinate section <code>(1,1,1)</code> represents starting at X=1, Y=1, Z=1. The grid reads <strong>bottom-to-top</strong> for Y coordinates:</p>
+<pre><code>Visual Grid (Y increases upward):
+┌───┬───┬───┐
+│ a │ a │ a │  Y=3 (top row in file = &quot;aaa&quot;)
+├───┼───┼───┤
+│ d │ b │ d │  Y=2 (middle row = &quot;dbd&quot;)
+├───┼───┼───┤
+│ d │ c │ d │  Y=1 (bottom row = &quot;dcd&quot;)
+└───┴───┴───┘
+  X=1 X=2 X=3
+</code></pre>
+<h3 id="tile-composition-order">Tile Composition Order</h3>
+<p>Each tile definition lists atoms from <strong>top to bottom</strong> in this order:</p>
+<ol>
+<li>Objects (<code>/obj/...</code>) - saved first, multiple allowed</li>
+<li>Mobs (<code>/mob/...</code>) - optional</li>
+<li>Turf (<code>/turf/...</code>) - exactly one required</li>
+<li>Area (<code>/area/...</code>) - exactly one required</li>
+</ol>
+<pre><code class="language-dm">&quot;c&quot; = (
+/obj/item/wrench{pixel_x = 5},  // Object with modified variable
+/obj/structure/table,            // Another object (table under the wrench)
+/turf/open/floor/iron,           // The floor turf
+/area/station/commons            // The area
+)
+</code></pre>
+<h3 id="variable-serialization-in-tgm">Variable Serialization in TGM</h3>
+<p>When an object has variables that differ from their initial (compiled) values, they're serialized inline:</p>
+<pre><code class="language-dm">// Object with default values - no braces needed
+/obj/structure/table,
+// Object with modified variables - uses braces
+/obj/item/wrench{
+	pixel_x = 5;
+	pixel_y = -3
+	},
+// Object with complex data
+/obj/machinery/conveyor_switch{
+	id = &quot;my_conveyor&quot;;
+	position = -1;
+	oneway = 1
+	},
+</code></pre>
+<h3 id="why-keys-matter">Why Keys Matter</h3>
+<p>The header system compresses map data by reusing definitions. If 100 tiles have identical contents, they all share one key instead of repeating the full definition 100 times.</p>
+<pre><code class="language-dm">// Instead of writing this 100 times in coordinates:
+/turf/open/floor/iron,
+/area/station/hallway
+// We define it once:
+&quot;a&quot; = (
+/turf/open/floor/iron,
+/area/station/hallway
+)
+// And reference &quot;a&quot; 100 times in the coordinate grid
+</code></pre>
+<hr />
+<h2 id="serialization-api">Serialization API</h2>
+<p>The world save system provides several procs that objects can override to control their serialization:</p>
+<h3 id="core-procs">Core Procs</h3><table><thead><tr><th style="text-align: left">Proc</th><th style="text-align: left">Purpose</th><th style="text-align: left">Returns</th></tr></thead><tbody>
+<tr><td style="text-align: left"><code>get_save_vars()</code></td><td style="text-align: left">List of variable names to save</td><td style="text-align: left"><code>list(&quot;var1&quot;, &quot;var2&quot;, ...)</code></td></tr>
+<tr><td style="text-align: left"><code>get_custom_save_vars()</code></td><td style="text-align: left">Variables with custom/calculated values</td><td style="text-align: left"><code>list(&quot;var1&quot; = value1, ...)</code></td></tr>
+<tr><td style="text-align: left"><code>on_object_saved()</code></td><td style="text-align: left">Save additional data (contents, helpers)</td><td style="text-align: left"><code>null</code></td></tr>
+<tr><td style="text-align: left"><code>substitute_with_typepath()</code></td><td style="text-align: left">Replace with a more compact type</td><td style="text-align: left"><code>typepath</code> or <code>FALSE</code></td></tr>
+<tr><td style="text-align: left"><code>is_saveable()</code></td><td style="text-align: left">Whether object should be saved at all</td><td style="text-align: left"><code>TRUE</code> or <code>FALSE</code></td></tr>
+<tr><td style="text-align: left"><code>PersistentInitialize()</code></td><td style="text-align: left">Post-load initialization</td><td style="text-align: left"><code>null</code></td></tr>
+</tbody></table>
+<h3 id="call-order-during-save">Call Order During Save</h3>
+<pre><code>1. is_saveable()              - Can we save this object?
+2. substitute_with_typepath() - Should we use a different type?
+3. on_object_saved()          - Save any extra data (mapping helpers, contents)
+4. get_save_vars()            - Get list of variables to check
+5. get_custom_save_vars()     - Get any custom variable values
+6. generate_tgm_metadata()    - Convert to TGM format string
+</code></pre>
+<hr />
+<h2 id="adding-serialization-to-objects">Adding Serialization to Objects</h2><h3 id="step-1-identify-what-needs-saving">Step 1: Identify What Needs Saving</h3>
+<p>Ask yourself:</p>
+<ul>
+<li>What variables change during gameplay that should persist?</li>
+<li>What variables are already part of the type path (don't need saving)?</li>
+<li>Are there any objects inside this object that need saving?</li>
+</ul>
+<h3 id="step-2-override">Step 2: Override <code>get_save_vars()</code></h3>
+<p>Return a list of variable names to save. Always call the parent and use <code>NAMEOF()</code>:</p>
+<pre><code class="language-dm">/obj/machinery/conveyor_switch/get_save_vars(save_flags=ALL)
+	. = ..()
+	. += NAMEOF(src, id)
+	. += NAMEOF(src, conveyor_speed)
+	. += NAMEOF(src, position)
+	. += NAMEOF(src, oneway)
+</code></pre>
+<p><strong>Why use <code>NAMEOF()</code>?</strong> It provides compile-time checking. If you rename a variable, the compiler will catch the error instead of silently breaking saves.</p>
+<p>Here's another example showing how to exclude variables from the parent:</p>
+<pre><code class="language-dm">/obj/structure/cable/get_save_vars(save_flags=ALL)
+	. = ..()
+	. += NAMEOF(src, cable_color)
+	. += NAMEOF(src, cable_layer)
+	. -= NAMEOF(src, color)  // Remove 'color' since cable_color handles this
+	return .
+</code></pre>
+<h3 id="step-3-override-if-needed">Step 3: Override <code>get_custom_save_vars()</code> (If Needed)</h3>
+<p>Use this when you need to:</p>
+<ul>
+<li>Save a calculated value</li>
+<li>Transform data before saving</li>
+<li>Save object references as IDs or type paths</li>
+</ul>
+<pre><code class="language-dm">/obj/machinery/power/apc/get_custom_save_vars(save_flags=ALL)
+	. = ..()
+	// Save charge as percentage instead of raw cell values
+	if(cell_type)
+		.[NAMEOF(src, start_charge)] = round((cell.charge / cell.maxcharge) * 100)
+	return .
+</code></pre>
+<p>Another example saving reagents from a container:</p>
+<pre><code class="language-dm">/obj/item/reagent_containers/get_custom_save_vars(save_flags=ALL)
+	. = ..()
+	var/has_identical_reagents = TRUE
+	var/list/cached_reagents = reagents.reagent_list
+	var/list/reagents_to_save
+	for(var/datum/reagent/reagent as anything in cached_reagents)
+		var/amount = floor(reagent.volume)
+		if(amount &lt;= 0)
+			continue
+		LAZYSET(reagents_to_save, reagent.type, amount)
+		// Check if reagent &amp; amount are identical to initial
+		if(LAZYACCESS(list_reagents, reagent.type) == amount)
+			continue
+		has_identical_reagents = FALSE
+	if(length(reagents_to_save) != length(list_reagents))
+		has_identical_reagents = FALSE
+	if(!has_identical_reagents)
+		.[NAMEOF(src, list_reagents)] = reagents_to_save
+	return .
+</code></pre>
+<h3 id="step-4-override-if-needed">Step 4: Override <code>PersistentInitialize()</code> (If Needed)</h3>
+<p>Called after the object loads from a save. Use for post-load setup:</p>
+<pre><code class="language-dm">/obj/machinery/camera/PersistentInitialize()
+	. = ..()
+	// Restore camera upgrades based on saved bitflags
+	if(camera_upgrade_bitflags &amp; CAMERA_UPGRADE_XRAY)
+		upgradeXRay()
+	if(camera_upgrade_bitflags &amp; CAMERA_UPGRADE_EMP_PROOF)
+		upgradeEmpProof()
+	if(camera_upgrade_bitflags &amp; CAMERA_UPGRADE_MOTION)
+		upgradeMotion()
+</code></pre>
+<p>Another example restoring machine state:</p>
+<pre><code class="language-dm">/obj/machinery/power/port_gen/pacman/PersistentInitialize()
+	. = ..()
+	if(active)
+		active = FALSE  // Reset so TogglePower() works correctly
+		TogglePower()
+	return .
+</code></pre>
+<hr />
+<h2 id="type-path-substitutions">Type Path Substitutions</h2>
+<p>Type path substitution is an optimization that replaces verbose variable serialization with compact type paths.</p>
+<h3 id="the-problem">The Problem</h3>
+<p>Consider atmospheric pipes. A pipe might save like this:</p>
+<pre><code class="language-dm">/obj/machinery/atmospherics/pipe/smart{
+	pipe_color = &quot;#FF0000&quot;;
+	hide = 1;
+	piping_layer = 4
+	}
+</code></pre>
+<p>Multiply this by thousands of pipes and save files become huge.</p>
+<h3 id="the-solution">The Solution</h3>
+<p>Instead, we substitute with a specialized subtype:</p>
+<pre><code class="language-dm">/obj/machinery/atmospherics/pipe/smart/manifold4w/scrubbers/hidden/layer4
+</code></pre>
+<p>The type path itself encodes all the information - no variables needed!</p>
+<h3 id="implementing-substitution">Implementing Substitution</h3>
+<pre><code class="language-dm">/obj/machinery/atmospherics/pipe/smart/substitute_with_typepath(map_string)
+	var/base_type = /obj/machinery/atmospherics/pipe/smart/manifold4w
+	var/cache_key = &quot;[base_type]-[pipe_color]-[hide]-[piping_layer]&quot;
+	if(isnull(GLOB.map_export_typepath_cache[cache_key]))
+		var/color_path = &quot;&quot;
+		switch(pipe_color)
+			if(COLOR_RED)
+				color_path = &quot;/scrubbers&quot;
+			if(COLOR_BLUE)
+				color_path = &quot;/supply&quot;
+			else
+				color_path = &quot;/general&quot;
+		var/visible_path = hide ? &quot;/hidden&quot; : &quot;/visible&quot;
+		var/layer_path = &quot;&quot;
+		if(piping_layer != 3)
+			layer_path = &quot;/layer[piping_layer]&quot;
+		var/full_path = &quot;[base_type][color_path][visible_path][layer_path]&quot;
+		var/typepath = text2path(full_path)
+		if(ispath(typepath))
+			GLOB.map_export_typepath_cache[cache_key] = typepath
+		else
+			GLOB.map_export_typepath_cache[cache_key] = FALSE
+			stack_trace(&quot;Failed to convert pipe to typepath: [full_path]&quot;)
+	var/cached_typepath = GLOB.map_export_typepath_cache[cache_key]
+	if(cached_typepath)
+		// All relevant variables are encoded in the typepath string
+		TGM_MAP_BLOCK(map_string, typepath, null)
+	return cached_typepath
+</code></pre>
+<h3 id="when-to-use-substitution">When to Use Substitution</h3>
+<p>✅ <strong>Good candidates:</strong></p>
+<ul>
+<li>Objects with many subtype variants (pipes, vents, wires)</li>
+<li>Common objects that appear thousands of times</li>
+<li>Objects where variables map directly to subtypes</li>
+</ul>
+<p>❌ <strong>Poor candidates:</strong></p>
+<ul>
+<li>Unique objects with complex state</li>
+<li>Objects with few instances</li>
+<li>Objects where subtypes don't exist for all combinations</li>
+</ul>
+<h3 id="substitution-with-remaining-variables">Substitution with Remaining Variables</h3>
+<p>Sometimes you can substitute the type but still need to save some variables:</p>
+<pre><code class="language-dm">/obj/machinery/atmospherics/components/unary/vent_scrubber/substitute_with_typepath(map_string)
+	var/base_type = /obj/machinery/atmospherics/components/unary/vent_scrubber
+	var/cache_key = &quot;[base_type]-[on]-[piping_layer]&quot;
+	if(isnull(GLOB.map_export_typepath_cache[cache_key]))
+		var/on_path = on ? &quot;/on&quot; : &quot;&quot;
+		var/layer_path = &quot;&quot;
+		if(piping_layer != 3)
+			layer_path = &quot;/layer[piping_layer]&quot;
+		var/full_path = &quot;[base_type][on_path][layer_path]&quot;
+		var/typepath = text2path(full_path)
+		if(ispath(typepath))
+			GLOB.map_export_typepath_cache[cache_key] = typepath
+		else
+			GLOB.map_export_typepath_cache[cache_key] = FALSE
+			stack_trace(&quot;Failed to convert vent scrubber to typepath: [full_path]&quot;)
+	var/cached_typepath = GLOB.map_export_typepath_cache[cache_key]
+	if(cached_typepath)
+		var/obj/machinery/atmospherics/components/unary/vent_scrubber/typepath = cached_typepath
+		// These variables can't be encoded in the typepath, so save them separately
+		var/list/variables = list()
+		TGM_ADD_TYPEPATH_VAR(variables, typepath, dir, dir)
+		TGM_ADD_TYPEPATH_VAR(variables, typepath, welded, welded)
+		TGM_ADD_TYPEPATH_VAR(variables, typepath, scrubbing, scrubbing)
+		TGM_ADD_TYPEPATH_VAR(variables, typepath, filter_types, filter_types)
+		TGM_ADD_TYPEPATH_VAR(variables, typepath, widenet, widenet)
+		TGM_MAP_BLOCK(map_string, typepath, generate_tgm_typepath_metadata(variables))
+	return cached_typepath
+</code></pre>
+<hr />
+<h2 id="saving-objects-inside-containers">Saving Objects Inside Containers</h2>
+<p>Many objects contain other objects (safes, bags, machines with parts). The world save system uses ID linking to preserve these relationships.</p>
+<h3 id="how-container-linking-works">How Container Linking Works</h3>
+<ol>
+<li><strong>During Save</strong>: Parent gets a unique ID, children reference that ID</li>
+<li><strong>During Load</strong>: Children look up parents by ID and move inside</li>
+</ol>
+<pre><code class="language-dm">// Saved format example - a secure safe containing items:
+/obj/structure/secure_safe{
+	save_container_parent_id = &quot;xK9mP2&quot;;
+	stored_lock_code = &quot;5173&quot;
+	},
+/obj/item/documents/syndicate{
+	save_container_child_id = &quot;xK9mP2&quot;
+	},
+/obj/item/stack/spacecash/c1000{
+	save_container_child_id = &quot;xK9mP2&quot;
+	},
+</code></pre>
+<h3 id="using">Using <code>save_stored_contents()</code></h3>
+<p>The helper proc handles most cases automatically:</p>
+<pre><code class="language-dm">/obj/structure/secure_safe/on_object_saved(map_string, turf/current_loc, list/obj_blacklist)
+	save_stored_contents(map_string, current_loc, obj_blacklist)
+</code></pre>
+<h3 id="saving-non-contents-objects">Saving Non-Contents Objects</h3>
+<p>Some objects store references outside of <code>contents</code>:</p>
+<pre><code class="language-dm">/obj/machinery/defibrillator_mount/on_object_saved(map_string, turf/current_loc, list/obj_blacklist)
+	var/list/defib_mount_contents = list()
+	// 'defib' is a var reference, not in contents
+	if(defib)
+		defib_mount_contents += defib
+	if(defib_mount_contents.len)
+		save_stored_contents(map_string, current_loc, obj_blacklist, defib_mount_contents)
+</code></pre>
+<h3 id="restoring-container-contents">Restoring Container Contents</h3>
+<p>In <code>PersistentInitialize()</code>, find and restore references:</p>
+<pre><code class="language-dm">/obj/machinery/defibrillator_mount/PersistentInitialize()
+	. = ..()
+	// After load, children are in contents - find and assign to our var
+	var/obj/item/defibrillator/defib_unit = locate(/obj/item/defibrillator) in contents
+	defib = defib_unit
+	if(is_operational &amp;&amp; defib)
+		begin_processing()
+	update_appearance()
+</code></pre>
+<h3 id="the-parameter">The <code>include_ids</code> Parameter</h3>
+<p>Some containers (closets, lockers) handle insertion automatically during <code>Initialize()</code>. For these, skip ID generation:</p>
+<pre><code class="language-dm">/obj/structure/closet/on_object_saved(map_string, turf/current_loc, list/obj_blacklist)
+	// include_ids=FALSE because closets auto-insert nearby contents during init
+	save_stored_contents(map_string, current_loc, obj_blacklist, include_ids=FALSE)
+</code></pre>
+<hr />
+<h2 id="best-practices">Best Practices</h2><h3 id="do">DO ✅</h3>
+<pre><code class="language-dm">// Use NAMEOF for compile-time safety
+. += NAMEOF(src, my_variable)
+// Call parent procs
+/obj/machinery/power/solar/get_save_vars(save_flags=ALL)
+	. = ..()  // Always call parent first!
+	. += NAMEOF(src, material_type)
+	. += NAMEOF(src, power_tier)
+// Check for meaningful changes in get_custom_save_vars()
+/obj/machinery/power/smes/get_custom_save_vars(save_flags=ALL)
+	. = ..()
+	.[NAMEOF(src, charge)] = total_charge()  // Calculated value
+	return .
+// Update appearance after loading
+/obj/machinery/biogenerator/PersistentInitialize()
+	. = ..()
+	update_appearance()
+</code></pre>
+<h3 id="dont">DON'T ❌</h3>
+<pre><code class="language-dm">// Don't use string literals for variable names
+. += &quot;my_variable&quot;  // Won't catch typos or renames!
+// Don't forget to call parent
+/obj/machinery/example/get_save_vars(save_flags=ALL)
+	return list(NAMEOF(src, foo))  // Missing parent vars!
+// Don't save default values (system handles this automatically)
+.[NAMEOF(src, dir)] = dir  // Wasteful if dir hasn't changed
+// Don't save references directly (they won't survive reload)
+.[NAMEOF(src, linked_machine)] = linked_machine  // Will be garbage after load!
+</code></pre>
+<h3 id="blacklisting-objects">Blacklisting Objects</h3>
+<p>For objects that should <strong>never</strong> be saved, add them to the global blacklist in <code>save_object_blacklist.dm</code>. Always include a comment explaining why the object is blacklisted:</p>
+<pre><code class="language-dm">GLOBAL_LIST_INIT(save_object_blacklist, typecacheof(list(
+	/obj/effect, // most effects are transient visual feedback
+	/obj/projectile, // bullets shouldn't be stuck mid-air
+	/mob/living/carbon, // carbon mobs are too complex to serialize reliably
+	/obj/structure/closet/supplypod, // very spammy and runtimes during initialize
+	/obj/item/paper/fluff/jobs/cargo/manifest, // spammed by cargo orders every round
+)))
+</code></pre>
+<p>For conditional exclusion, override <code>is_saveable()</code>:</p>
+<pre><code class="language-dm">/obj/machinery/atmospherics/components/unary/is_saveable(turf/current_loc, list/obj_blacklist)
+	// Don't save if we're under a cryo cell (it spawns us automatically)
+	if(locate(/obj/machinery/cryo_cell) in loc)
+		return FALSE
+	return ..()
+</code></pre>
+<p>Another example with multiple conditions:</p>
+<pre><code class="language-dm">/obj/item/paper/is_saveable(turf/current_loc, list/obj_blacklist)
+	// Don't save blank papers
+	if(is_empty())
+		return FALSE
+	// Only save papers in specific containers to reduce spam
+	if(!is_type_in_typecache(loc, GLOB.saveable_paper_container_whitelist))
+		return FALSE
+	return ..()
+</code></pre>
+<h3 id="performance-considerations">Performance Considerations</h3>
+<ol>
+<li><strong>Cache type path lookups</strong> - Use <code>GLOB.map_export_typepath_cache</code></li>
+<li><strong>Avoid saving spam objects</strong> - Seeds, grown food, mail items</li>
+<li><strong>Use substitution for common objects</strong> - Pipes, vents, wires</li>
+<li><strong>Limit objects per tile</strong> - System caps mobs/objects per tile automatically</li>
+</ol></td></tr></table></main><footer>tgstation.dme <a href="https://github.com/tgp-station/tgp-station/tree/0f67d518085748577dfd8d381e48dceb6a56cd44">0f67d51</a> (master) — <a href="https://github.com/SpaceManiac/SpacemanDMM/blob/master/crates/dmdoc/README.md">dmdoc 1.11.0</a></footer></body></html>
