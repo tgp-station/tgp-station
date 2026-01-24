@@ -1,3 +1,68 @@
+/obj/machinery
+	var/list/persistent_components
+
+/obj/machinery/get_custom_save_vars(save_flags=ALL) //FIXME: Fails to save cells (and maybe other items)
+	. = ..()
+	var/obj/item/circuitboard/machine/machine_circuit = circuit
+	if(!istype(machine_circuit) || !length(machine_circuit.req_components))
+		return
+
+	var/list/comps_to_save
+	for(var/datum/component as anything in component_parts)
+		if(!istype(component, /obj/item/stock_parts) && !istype(component, /datum/stock_part)) continue
+		if(component == machine_circuit) continue
+		if(!isnull(machine_circuit.req_components[component.type])) continue
+		if(get_tier(component) == 1) continue //ignore T1
+		LAZYADD(comps_to_save, component.type)
+
+	if(LAZYLEN(comps_to_save))
+		.[NAMEOF(src, persistent_components)] = comps_to_save
+
+
+/obj/machinery/Initialize(mapload)
+	if(!LAZYLEN(persistent_components) || isnull(circuit))
+		return ..()
+	if(ispath(circuit, /obj/item/circuitboard))
+		circuit = new circuit(src)
+	else
+		circuit = locate() in contents
+	var/obj/item/circuitboard/machine/machine_circuit = circuit
+	var/list/operating_parts = list()
+	for(var/key in machine_circuit.req_components)
+		operating_parts += key
+	for(var/datum/component as anything in persistent_components)
+		for(var/mach_comp in operating_parts)
+			if(get_base_stock_path(component) != get_base_stock_path(mach_comp)) continue
+			operating_parts -= mach_comp
+		if(ispath(component, /datum/stock_part))
+			persistent_components -= component
+			persistent_components += GLOB.stock_part_datums[component]
+
+
+
+
+	machine_circuit.replacement_parts = operating_parts + persistent_components //shit implementation todo
+	return ..()
+
+/obj/machinery/proc/get_tier(datum/part)
+	if(!ispath(part))
+		part = part.type
+	var/datum/stock_part/as_datum = part
+	var/obj/item/stock_parts/as_item = part
+	if(!ispath(part, /datum/stock_part) && !ispath(part, /obj/item/stock_parts)) return null
+	return istype(as_datum) ? initial(as_datum.tier) : initial(as_item.rating)
+
+/obj/machinery/proc/get_base_stock_path(datum/stock_part/part)
+	if(isnull(part))
+		CRASH("get base somehow null")
+	if(!ispath(part))
+		part = part.type
+	if(ispath(part, /obj/item/stock_parts))
+		part = GLOB.stock_part_datums_per_object[part]
+	var/todo = GLOB.stock_part_datums_per_object[initial(part.physical_object_base_type)]
+	return todo
+
+
 /obj/machinery/get_save_vars(save_flags=ALL)
 	. = ..()
 	. += NAMEOF(src, panel_open)

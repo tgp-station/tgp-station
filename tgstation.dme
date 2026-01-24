@@ -6852,6 +6852,7 @@
 #include "modular_tgp\persistence\objects\machinery.dm"
 #include "modular_tgp\persistence\objects\material_stacks.dm"
 #include "modular_tgp\persistence\objects\medical.dm"
+#include "modular_tgp\persistence\objects\misc.dm"
 #include "modular_tgp\persistence\objects\money.dm"
 #include "modular_tgp\persistence\objects\power.dm"
 #include "modular_tgp\persistence\objects\puzzle.dm"
