@@ -67,5 +67,4 @@
 	var/list/autolinked_machines = list()
 	for(var/obj/machinery/telecomms/machine as anything in links)
 		autolinked_machines |= machine.id
-	.[NAMEOF(src, autolinkers)] = list()
 	.[NAMEOF(src, persistence_tcomms_links)] = autolinked_machines
