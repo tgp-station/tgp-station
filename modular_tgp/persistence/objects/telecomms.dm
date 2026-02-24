@@ -48,6 +48,18 @@
 	. = ..()
 	. += NAMEOF(src, change_frequency)
 
+/obj/machinery/telecomms
+	var/list/persistence_tcomms_links
+
+/obj/machinery/telecomms/PersistentInitialize()
+	. = ..()
+	// Telecomms has the most stupid possible way to connect machines
+	for(var/obj/machinery/telecomms/telecomms_machine as anything in GLOB.telecomm_machines)
+		if(telecomms_machine == src || !(telecomms_machine.id in persistence_tcomms_links))
+			continue
+		add_new_link(telecomms_machine)
+	persistence_tcomms_links = null
+
 /obj/machinery/telecomms/get_custom_save_vars(save_flags=ALL)
 	. = ..()
 	if(!length(links))
@@ -55,4 +67,4 @@
 	var/list/autolinked_machines = list()
 	for(var/obj/machinery/telecomms/machine as anything in links)
 		autolinked_machines |= machine.id
-	.[NAMEOF(src, autolinkers)] = autolinked_machines
+	.[NAMEOF(src, persistence_tcomms_links)] = autolinked_machines
