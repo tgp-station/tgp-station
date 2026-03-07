@@ -1,0 +1,4 @@
+author: "timothymtorres"
+delete-after: True
+changes:
+  - server: "Change default config settings so that round events are x10 as rare, bombcap is half, lavaland budget is half, 1 mouse per roundstart, respawns enabled, afk period enabled, and new admin rank list."
