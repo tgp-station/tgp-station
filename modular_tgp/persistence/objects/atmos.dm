@@ -329,7 +329,7 @@
 /obj/effect/mapping_helpers/pipe_gas/LateInitialize()
 	var/obj/machinery/atmospherics/pipe/pipe
 	for(var/obj/machinery/atmospherics/pipe/potential_pipe in loc)
-		if(!isnull(id_filter) && (potential_pipe.id_tag != id_filter || potential_pipe.persistence_pipe_id != id_filter)) continue
+		if(!isnull(id_filter) && potential_pipe.id_tag != id_filter && potential_pipe.persistence_pipe_id != id_filter) continue
 		if(isnull(id_filter) && potential_pipe.piping_layer != pipe_layer) continue
 		pipe = potential_pipe
 		break
