@@ -103,6 +103,7 @@
 	taste_description = "sourness"
 	ph = 2
 	chemical_flags = REAGENT_CAN_BE_SYNTHESIZED
+	default_container = /obj/item/reagent_containers/cup/glass/bottle/juice/lemonjuice
 
 /datum/reagent/consumable/banana
 	name = "Banana Juice"
@@ -1360,13 +1361,13 @@
 /atom/movable/screen/alert/fruit_punch_good
 	name = "Fruit Punch Blessing"
 	desc = "The sweetness of the fruit punch and the friendly company of the liquid cooler are slowly restoring your health..."
-	use_user_hud_icon = TRUE
+	use_user_hud_icon = USER_HUD_STYLE_INHERIT
 	overlay_state = "punch_blessing"
 
 /atom/movable/screen/alert/fruit_punch_bad
 	name = "Fruit Punishment"
 	desc = "The unbearable sweetness of the fruit punch is too much to bear without the soothing aura of a liquid cooler! Your body is going into shock!"
-	use_user_hud_icon = TRUE
+	use_user_hud_icon = USER_HUD_STYLE_INHERIT
 	overlay_state = "punch_punishment"
 
 /datum/reagent/consumable/ethanol/bitters_soda
@@ -1388,7 +1389,7 @@
 	color = "#DE55ED"
 	quality = DRINK_GOOD
 	taste_description = "purple and a hint of opioid."
-	addiction_types = list(/datum/addiction/opioids = 6)
+	addiction_types = list(/datum/addiction/opioids = 200)
 	chemical_flags = REAGENT_CAN_BE_SYNTHESIZED
 	metabolization_rate = 0.5 * REAGENTS_METABOLISM
 
