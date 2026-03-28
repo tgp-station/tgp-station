@@ -33,6 +33,9 @@
 	. = ..()
 	. += NAMEOF(src, broken)
 	. += NAMEOF(src, burnt)
+
+	. -= NAMEOF(src, pixel_x)
+	. -= NAMEOF(src, pixel_y)
 	return .
 
 /turf/open/PersistentInitialize()
